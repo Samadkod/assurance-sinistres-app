@@ -1,61 +1,81 @@
+# app_streamlit_assurance.py
+
 import streamlit as st
 import pandas as pd
-import plotly.express as px
 import xgboost as xgb
 from sklearn.model_selection import train_test_split
+from sklearn.metrics import mean_squared_error, r2_score
+import numpy as np
 
-st.set_page_config(page_title="🚗 Sinistres Auto", layout="wide")
+st.set_page_config(page_title="Sinistres Auto - Assurance", layout="wide")
 
 # Chargement des données
 @st.cache_data
 def load_data():
-    return pd.read_csv("DB_TELEMATICS_PROPRE_I.csv")
+    df = pd.read_csv("DB_TELEMATICS_PROPRE_I.csv")
+    df = df.rename(columns={
+        "Veh_value": "Veh_value",
+        "Car_use": "Car_use",
+        "Zone": "Zone",
+        "Age": "Age",
+        "Bonus_malus": "Bonus_malus",
+        "Exposure": "Exposure",
+        "Claim_amount": "Claim_amount"
+    })
+    return df
 
 df = load_data()
 
-st.title("🚗 Pilotage des Sinistres Auto - Projet Assurance")
-st.markdown("Application interactive pour explorer les données de sinistres et visualiser les prédictions des montants.")
+# Interface utilisateur
+st.title("🚗 Pilotage des Sinistres Auto")
+st.markdown("Une application interactive pour explorer les données de sinistres et visualiser les prédictions.")
 
-# Afficher les colonnes disponibles
-st.write("Colonnes disponibles dans les données :", df.columns.tolist())
+with st.sidebar:
+    st.header("🎯 Filtres")
+    zone = st.selectbox("Zone", options=df["Zone"].unique())
+    car_use = st.selectbox("Utilisation du véhicule", options=df["Car_use"].unique())
+    age = st.slider("Âge du conducteur", int(df["Age"].min()), int(df["Age"].max()), int(df["Age"].mean()))
+    bonus = st.slider("Bonus/Malus", int(df["Bonus_malus"].min()), int(df["Bonus_malus"].max()), int(df["Bonus_malus"].mean()))
 
-# Vérification des colonnes clés
-required_columns = ["Car_use", "Age", "Zone", "Bonus_malus", "Veh_value", "Exposure", "Claim_amount"]
-missing_cols = [col for col in required_columns if col not in df.columns]
+# Filtrage des données
+df_filtered = df[
+    (df["Zone"] == zone) &
+    (df["Car_use"] == car_use) &
+    (df["Age"] == age) &
+    (df["Bonus_malus"] == bonus)
+]
 
-if missing_cols:
-    st.error(f"Colonnes manquantes : {missing_cols}")
-    st.stop()
+st.write(f"Nombre d'observations après filtrage : {df_filtered.shape[0]}")
+st.dataframe(df_filtered.head(10))
 
-# Filtrage utilisateur
-with st.form("filters_form"):
-    selected_use = st.selectbox("Usage du véhicule", options=df["Car_use"].unique())
-    zone = st.selectbox("Zone géographique", options=df["Zone"].unique())
-    valider = st.form_submit_button("Valider")
+# Préparation du modèle XGBoost
+st.subheader("📊 Modélisation XGBoost")
 
-if valider:
-    filtered_df = df[(df["Car_use"] == selected_use) & (df["Zone"] == zone)]
+features = ['Age', 'Zone', 'Bonus_malus', 'Veh_value', 'Exposure']
+df_model = df.dropna(subset=features + ['Claim_amount'])
+X = pd.get_dummies(df_model[features])
+y = df_model["Claim_amount"]
 
-    st.subheader("🔍 Données filtrées")
-    st.dataframe(filtered_df.head())
+X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42)
 
-    st.subheader("📊 Analyse descriptive")
-    fig1 = px.histogram(filtered_df, x="Veh_value", title="Répartition de la valeur des véhicules")
-    st.plotly_chart(fig1, use_container_width=True)
+model = xgb.XGBRegressor(objective="reg:squarederror")
+model.fit(X_train, y_train)
 
-    st.subheader("📈 Prédiction du montant des sinistres")
+# Prédiction et performance
+y_pred = model.predict(X_test)
+rmse = mean_squared_error(y_test, y_pred, squared=False)
+r2 = r2_score(y_test, y_pred)
 
-    X = filtered_df[["Age", "Bonus_malus", "Veh_value", "Exposure"]]
-    y = filtered_df["Claim_amount"]
+st.metric("RMSE du modèle", f"{rmse:.2f} €")
+st.metric("R²", f"{r2:.2%}")
 
-    X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42)
+# Prédiction sur filtres
+if df_filtered.shape[0] > 0:
+    X_input = pd.get_dummies(df_filtered[features])
+    X_input = X_input.reindex(columns=X.columns, fill_value=0)
+    y_input_pred = model.predict(X_input)
 
-    model = xgb.XGBRegressor()
-    model.fit(X_train, y_train)
-    y_pred = model.predict(X_test)
-
-    df_results = pd.DataFrame({"Réel": y_test, "Prédit": y_pred})
-    st.write(df_results.head())
-
-    fig2 = px.scatter(df_results, x="Réel", y="Prédit", title="Réel vs Prédit")
-    st.plotly_chart(fig2, use_container_width=True)
+    st.subheader("📈 Prédictions pour les filtres choisis")
+    df_filtered = df_filtered.copy()
+    df_filtered["Montant prédit (€)"] = y_input_pred
+    st.dataframe(df_filtered[features + ["Claim_amount", "Montant prédit (€)"]])
