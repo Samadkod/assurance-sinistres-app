@@ -1,54 +1,59 @@
-
 import streamlit as st
 import pandas as pd
 import plotly.express as px
 import joblib
-from sklearn.ensemble import RandomForestRegressor
-from sklearn.metrics import mean_squared_error
-import numpy as np
 
-# Titre principal
-st.title("🚗 Pilotage des Sinistres Auto - Projet Assurance")
-st.markdown("Une application interactive pour explorer les données de sinistres et visualiser les prédictions des montants.")
+st.set_page_config(page_title="Pilotage des Sinistres Auto", layout="wide")
 
-# Chargement des données
 @st.cache_data
 def load_data():
-    return pd.read_csv("DB_TELEMATICS_PROPRE_I.csv")
+    df = pd.read_csv("DB_TELEMATICS_PROPRE_I.csv")
+    return df
 
+# Chargement des données
 df = load_data()
 
-# Sélecteurs pour filtrer les données
-st.sidebar.header("🎯 Filtres")
-selected_vehicules = st.sidebar.multiselect("Catégorie véhicule", options=df["categorie_vehicule"].unique(), default=df["categorie_vehicule"].unique())
-selected_villes = st.sidebar.multiselect("Ville", options=df["ville"].unique(), default=df["ville"].unique())
+st.title("🚗 Pilotage des Sinistres Auto")
+st.markdown("Une application interactive pour explorer les données de sinistres et visualiser les prédictions des montants.")
 
-df_filtered = df[(df["categorie_vehicule"].isin(selected_vehicules)) & (df["ville"].isin(selected_villes))]
+# Filtrage par usage du véhicule (au lieu de "categorie_vehicule")
+if "Car_use" in df.columns:
+    selected_usage = st.sidebar.multiselect("Usage du véhicule", options=df["Car_use"].unique(), default=df["Car_use"].unique())
+    df = df[df["Car_use"].isin(selected_usage)]
+else:
+    st.sidebar.warning("⚠️ Colonne 'Car_use' introuvable dans le fichier CSV.")
 
-# Affichage des données filtrées
-st.subheader("🔍 Aperçu des données filtrées")
-st.dataframe(df_filtered.head())
+# Affichage des statistiques descriptives
+st.subheader("📊 Aperçu des données")
+st.dataframe(df.head())
 
-# Visualisation du montant moyen des sinistres par ville
-st.subheader("📊 Montant moyen des sinistres par ville")
-avg_sinistres = df_filtered.groupby("ville")["montant_sinistre"].mean().reset_index()
-fig1 = px.bar(avg_sinistres, x="ville", y="montant_sinistre", title="Montant moyen des sinistres par ville", text_auto=".2s")
-st.plotly_chart(fig1)
+# Histogramme du nombre de sinistres par tranche d'âge
+if "Age_vehicule" in df.columns:
+    fig_age = px.histogram(df, x="Age_vehicule", title="Distribution de l'âge des véhicules")
+    st.plotly_chart(fig_age, use_container_width=True)
 
-# Carte des sinistres
-if "longitude" in df_filtered.columns and "latitude" in df_filtered.columns:
-    st.subheader("🗺️ Carte des sinistres")
-    st.map(df_filtered[["latitude", "longitude"]])
+# Visualisation de la gravité moyenne des sinistres
+if "Montant_sinistre" in df.columns and "Zone" in df.columns:
+    gravite_par_zone = df.groupby("Zone")["Montant_sinistre"].mean().reset_index()
+    fig_gravite = px.bar(gravite_par_zone, x="Zone", y="Montant_sinistre", title="Gravité moyenne des sinistres par zone")
+    st.plotly_chart(fig_gravite, use_container_width=True)
 
-# Benchmark des modèles
-st.subheader("⚙️ Benchmark des Modèles")
-benchmark_data = {
-    "Modèle": ["Random Forest", "XGBoost", "GLM Tweedie"],
-    "RMSE": [191.82, 196.55, 212.43]
-}
-df_benchmark = pd.DataFrame(benchmark_data)
-st.dataframe(df_benchmark)
+# 🔮 Simulation de prédiction de sinistre
+st.subheader("🔮 Simulation de prédiction")
+
+with st.form("prediction_form"):
+    age_veh = st.slider("Âge du véhicule", min_value=0, max_value=30, value=5)
+    km_parcourus = st.number_input("Kilomètres parcourus par an", min_value=0, max_value=100000, value=15000)
+    zone = st.selectbox("Zone", options=df["Zone"].unique())
+    puissance = st.slider("Puissance fiscale", min_value=1, max_value=20, value=6)
+    submit = st.form_submit_button("Prédire")
+
+if submit:
+    # Simulation d'un modèle prédictif (à remplacer par XGBoost ou autre)
+    prediction = 300 + age_veh * 20 + (km_parcourus / 1000) * 15 + puissance * 25
+    st.success(f"✅ Montant de sinistre estimé : {round(prediction, 2)} €")
 
 # Footer
 st.markdown("---")
-st.markdown("Projet réalisé par **Samadou Kodon** – Portfolio : [https://samadkod.github.io](https://samadkod.github.io)")
+st.markdown("📁 Fichier utilisé : `DB_TELEMATICS_PROPRE_I.csv`")
+st.markdown("👤 Réalisé par Samadou Kodon")
