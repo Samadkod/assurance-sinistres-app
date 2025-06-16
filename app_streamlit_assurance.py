@@ -1,81 +1,72 @@
-# app_streamlit_assurance.py
 
 import streamlit as st
 import pandas as pd
+import plotly.express as px
 import xgboost as xgb
 from sklearn.model_selection import train_test_split
 from sklearn.metrics import mean_squared_error, r2_score
-import numpy as np
 
-st.set_page_config(page_title="Sinistres Auto - Assurance", layout="wide")
+st.set_page_config(page_title="🚗 Pilotage des Sinistres Auto", layout="wide")
 
 # Chargement des données
 @st.cache_data
 def load_data():
     df = pd.read_csv("DB_TELEMATICS_PROPRE_I.csv")
-    df = df.rename(columns={
-        "Veh_value": "Veh_value",
-        "Car_use": "Car_use",
-        "Zone": "Zone",
-        "Age": "Age",
-        "Bonus_malus": "Bonus_malus",
-        "Exposure": "Exposure",
-        "Claim_amount": "Claim_amount"
-    })
     return df
 
 df = load_data()
 
-# Interface utilisateur
-st.title("🚗 Pilotage des Sinistres Auto")
-st.markdown("Une application interactive pour explorer les données de sinistres et visualiser les prédictions.")
+st.title("🚗 Pilotage des Sinistres Auto - Application Streamlit")
+st.markdown("**Une application interactive pour explorer les données de sinistres et visualiser les prédictions.**")
 
-with st.sidebar:
-    st.header("🎯 Filtres")
-    zone = st.selectbox("Zone", options=df["Zone"].unique())
-    car_use = st.selectbox("Utilisation du véhicule", options=df["Car_use"].unique())
-    age = st.slider("Âge du conducteur", int(df["Age"].min()), int(df["Age"].max()), int(df["Age"].mean()))
-    bonus = st.slider("Bonus/Malus", int(df["Bonus_malus"].min()), int(df["Bonus_malus"].max()), int(df["Bonus_malus"].mean()))
+# Affichage des premières lignes
+if st.checkbox("Afficher un échantillon des données"):
+    st.dataframe(df.head(20))
 
-# Filtrage des données
-df_filtered = df[
-    (df["Zone"] == zone) &
-    (df["Car_use"] == car_use) &
-    (df["Age"] == age) &
-    (df["Bonus_malus"] == bonus)
+# Filtres
+st.sidebar.header("🎯 Filtres")
+selected_zone = st.sidebar.multiselect("Zone", options=df["Zone"].dropna().unique(), default=list(df["Zone"].dropna().unique()))
+selected_car_use = st.sidebar.multiselect("Usage véhicule", options=df["Car_use"].dropna().unique(), default=list(df["Car_use"].dropna().unique()))
+selected_fuel = st.sidebar.multiselect("Carburant", options=df["Fuel"].dropna().unique(), default=list(df["Fuel"].dropna().unique()))
+
+filtered_df = df[
+    df["Zone"].isin(selected_zone) &
+    df["Car_use"].isin(selected_car_use) &
+    df["Fuel"].isin(selected_fuel)
 ]
 
-st.write(f"Nombre d'observations après filtrage : {df_filtered.shape[0]}")
-st.dataframe(df_filtered.head(10))
+# Visualisation
+st.subheader("📊 Analyse des sinistres")
+col1, col2 = st.columns(2)
 
-# Préparation du modèle XGBoost
-st.subheader("📊 Modélisation XGBoost")
+with col1:
+    st.plotly_chart(px.histogram(filtered_df, x="Veh_value", nbins=30, title="Valeur des véhicules"))
 
-features = ['Age', 'Zone', 'Bonus_malus', 'Veh_value', 'Exposure']
-df_model = df.dropna(subset=features + ['Claim_amount'])
-X = pd.get_dummies(df_model[features])
-y = df_model["Claim_amount"]
+with col2:
+    st.plotly_chart(px.box(filtered_df, x="Claim_amount", title="Répartition des montants de sinistres"))
 
-X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42)
+# Modélisation XGBoost
+st.subheader("🧠 Prédiction du montant des sinistres (XGBoost)")
 
-model = xgb.XGBRegressor(objective="reg:squarederror")
-model.fit(X_train, y_train)
+features = ["Age", "Zone", "Bonus_malus", "Veh_value", "Exposure"]
+target = "Claim_amount"
 
-# Prédiction et performance
-y_pred = model.predict(X_test)
-rmse = mean_squared_error(y_test, y_pred, squared=False)
-r2 = r2_score(y_test, y_pred)
+try:
+    X = pd.get_dummies(filtered_df[features])
+    y = filtered_df[target]
 
-st.metric("RMSE du modèle", f"{rmse:.2f} €")
-st.metric("R²", f"{r2:.2%}")
+    X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42)
+    model = xgb.XGBRegressor()
+    model.fit(X_train, y_train)
 
-# Prédiction sur filtres
-if df_filtered.shape[0] > 0:
-    X_input = pd.get_dummies(df_filtered[features])
-    X_input = X_input.reindex(columns=X.columns, fill_value=0)
-    y_input_pred = model.predict(X_input)
+    y_pred = model.predict(X_test)
 
-    st.subheader("📈 Prédictions pour les filtres choisis")
-    df_filtered = df_filtered.copy()
-    df_filtered["Montant prédit (€)"] = y_input_pred
-    st.dataframe(df_filtered[features + ["Claim_amount", "Montant prédit (€)"]])
+    st.markdown(f"**RMSE :** {mean_squared_error(y_test, y_pred, squared=False):.2f}")
+    st.markdown(f"**R² :** {r2_score(y_test, y_pred):.2f}")
+
+    st.markdown("### 🔍 Exemple de prédictions")
+    results_df = pd.DataFrame({"Réel": y_test, "Prédit": y_pred}).reset_index(drop=True)
+    st.dataframe(results_df.head(10))
+
+except Exception as e:
+    st.error(f"Erreur lors de l'entraînement du modèle : {e}")
